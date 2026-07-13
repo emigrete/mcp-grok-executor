@@ -16,6 +16,7 @@ import {
   type GrokStreamEvent,
 } from "./streamEvents.js";
 import type { GrokTransport } from "./transport.js";
+import { acpTransport } from "./acpTransport.js";
 
 export type RunMode = "execute" | "review" | "continue";
 
@@ -478,20 +479,20 @@ async function cliRun(opts: GrokRunOptions): Promise<GrokRunResult> {
 export const cliTransport: GrokTransport = { name: "cli", run: cliRun };
 
 /**
- * Run Grok headless. Dispatches to the configured transport (cli today; acp later).
- * For background=true, returns immediately with jobId.
+ * Run Grok headless. Dispatches to the configured transport (cli or acp).
+ * For background=true, returns immediately with jobId (CLI only — ACP is sync).
  */
 export async function runGrok(opts: GrokRunOptions): Promise<GrokRunResult> {
-  // ACP can't restrict tools (review) nor resume "most recent" (continue without
-  // sessionId / continueRecent) — always force the CLI transport for those paths.
+  // ACP can't restrict tools (review), resume "most recent" (continue without
+  // sessionId / continueRecent), or run detached background jobs — force CLI.
   const continueWithoutSession =
     opts.continueRecent || (opts.mode === "continue" && !opts.sessionId);
-  if (opts.mode === "review" || continueWithoutSession) {
+  if (opts.mode === "review" || continueWithoutSession || opts.background) {
     return cliTransport.run(opts);
   }
 
   if (config.transport === "acp") {
-    throw new Error("MCP_GROK_TRANSPORT=acp is not implemented yet");
+    return acpTransport.run(opts);
   }
 
   return cliTransport.run(opts);

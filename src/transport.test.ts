@@ -8,7 +8,7 @@ import { join } from "node:path";
 // (module cache persists within one test file).
 process.env.MCP_GROK_TRANSPORT = "acp";
 
-test("acp transport is not wired yet", async () => {
+test("acp config routes execute runs over ACP", async () => {
   const dir = await mkdtemp(join(tmpdir(), "mgx-transport-"));
   await writeFile(join(dir, "auth.json"), "{}", "utf8");
   process.env.GROK_BIN = join(process.cwd(), "scripts", "fake-grok.mjs");
@@ -18,15 +18,13 @@ test("acp transport is not wired yet", async () => {
 
   const { runGrok } = await import("./grokRunner.js");
 
-  await assert.rejects(
-    () =>
-      runGrok({
-        prompt: "x",
-        cwd: "/tmp",
-        mode: "execute",
-      }),
-    /not implemented/,
-  );
+  const result = await runGrok({
+    prompt: "x",
+    cwd: dir,
+    mode: "execute",
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.sessionId, "acp-session-fixture");
 
   // review mode always uses CLI even when transport is acp
   const review = await runGrok({
