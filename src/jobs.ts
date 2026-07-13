@@ -23,6 +23,17 @@ export type JobRecord = {
 
 const jobs = new Map<string, JobRecord>();
 const children = new Map<string, ChildProcess>();
+const aborts = new Map<string, () => void>();
+
+/** Register an abort callback for a job (e.g. AbortController.abort).
+ *  Auto-cleans up after firing once. */
+export function registerAbort(id: string, fn: () => void): void {
+  const wrapped = () => {
+    aborts.delete(id);
+    fn();
+  };
+  aborts.set(id, wrapped);
+}
 
 export async function ensureCacheDir(): Promise<string> {
   const dir = join(config.cacheDir, "jobs");
@@ -100,7 +111,17 @@ export function cancelJob(id: string): { ok: boolean; message: string } {
   if (job.state !== "running") {
     return { ok: false, message: `Job ${id} is already ${job.state}` };
   }
+
+  const fireAbort = () => {
+    const abort = aborts.get(id);
+    if (abort) {
+      abort();
+      aborts.delete(id);
+    }
+  };
+
   if (!child || child.killed) {
+    fireAbort();
     void updateJob(id, {
       state: "cancelled",
       finishedAt: new Date().toISOString(),
@@ -113,12 +134,14 @@ export function cancelJob(id: string): { ok: boolean; message: string } {
     setTimeout(() => {
       if (!child.killed) child.kill("SIGKILL");
     }, 2000);
+    fireAbort();
     void updateJob(id, {
       state: "cancelled",
       finishedAt: new Date().toISOString(),
     });
     return { ok: true, message: `Sent SIGTERM to job ${id} (pid ${child.pid})` };
   } catch (err) {
+    fireAbort();
     const message = err instanceof Error ? err.message : String(err);
     return { ok: false, message };
   }

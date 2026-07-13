@@ -19,6 +19,8 @@ export type RunTaskOptions = {
   onProgress?: (line: string, important?: boolean) => void;
   /** Raw grok stream events, forwarded from every inner run */
   onEvent?: (ev: GrokStreamEvent) => void;
+  /** Abort in-flight grok runs and verify commands; checked between steps */
+  signal?: AbortSignal;
 };
 
 export type TaskAttempt = {
@@ -139,6 +141,7 @@ export async function runTaskLoop(
       timeoutSec: opts.timeoutSec,
       sessionId,
       onEvent: opts.onEvent,
+      signal: opts.signal,
     });
     attempts.push({
       type,
@@ -155,6 +158,9 @@ export async function runTaskLoop(
   if (!first.ok) {
     return finish(false, first.error ?? "grok execute run failed");
   }
+  if (opts.signal?.aborted) {
+    return finish(false, "cancelled");
+  }
 
   if (!opts.verifyCommand) {
     return finish(true);
@@ -163,7 +169,7 @@ export async function runTaskLoop(
   const cmd = opts.verifyCommand;
   for (let attempt = 0; ; attempt++) {
     progress(`── verify (${attempt + 1}): ${cmd} ──`);
-    const res = await runCommand(cmd, opts.cwd, verifyTimeout);
+    const res = await runCommand(cmd, opts.cwd, verifyTimeout, opts.signal);
     verify = {
       command: cmd,
       ran: true,
@@ -171,6 +177,9 @@ export async function runTaskLoop(
       output: res.output,
       attemptsUsed: attempt + 1,
     };
+    if (opts.signal?.aborted) {
+      return finish(false, "cancelled");
+    }
     if (res.exitCode === 0) {
       progress(`── verify passed ──`);
       return finish(true);
@@ -189,6 +198,9 @@ export async function runTaskLoop(
     );
     if (!fix.ok) {
       return finish(false, fix.error ?? "grok fix run failed");
+    }
+    if (opts.signal?.aborted) {
+      return finish(false, "cancelled");
     }
   }
 }

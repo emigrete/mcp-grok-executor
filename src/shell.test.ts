@@ -28,3 +28,15 @@ test("times out, kills the process, and annotates output", async () => {
   assert.equal(r.exitCode, null);
   assert.match(r.output, /timeout after 1s/);
 });
+
+test("abort kills the command quickly", async () => {
+  const ac = new AbortController();
+  setTimeout(() => ac.abort(), 100);
+  const started = Date.now();
+  const r = await runCommand("sleep 5", tmpdir(), 10, ac.signal);
+  const elapsed = Date.now() - started;
+  assert.ok(elapsed < 2000, `expected <2s, took ${elapsed}ms`);
+  assert.equal(r.exitCode, null);
+  assert.equal(r.timedOut, false);
+  assert.match(r.output, /\[cancelled\]/);
+});

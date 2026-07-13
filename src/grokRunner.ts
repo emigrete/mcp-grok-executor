@@ -35,6 +35,8 @@ export type GrokRunOptions = {
   background?: boolean;
   /** Live parsed stream events (thought/text/end/raw) as they arrive */
   onEvent?: (ev: GrokStreamEvent) => void;
+  /** Abort in-flight grok process (process-group kill) */
+  signal?: AbortSignal;
 };
 
 export type GrokRunResult = {
@@ -175,6 +177,22 @@ function makeStreamCollector(onEvent?: (ev: GrokStreamEvent) => void) {
   };
 }
 
+function killTree(child: ChildProcess, sig: NodeJS.Signals): void {
+  try {
+    if (child.pid !== undefined) {
+      process.kill(-child.pid, sig);
+      return;
+    }
+  } catch {
+    /* fall through to direct kill */
+  }
+  try {
+    child.kill(sig);
+  } catch {
+    /* ignore */
+  }
+}
+
 function spawnGrok(
   args: string[],
   cwd: string,
@@ -184,6 +202,7 @@ function spawnGrok(
     cwd,
     env: { ...process.env },
     stdio: ["ignore", "pipe", "pipe"],
+    detached: true,
   });
   return { child, command };
 }
@@ -226,14 +245,10 @@ async function waitForChild(
 
     const timer = setTimeout(() => {
       timedOut = true;
-      try {
-        child.kill("SIGTERM");
-        setTimeout(() => {
-          if (!child.killed) child.kill("SIGKILL");
-        }, 2000);
-      } catch {
-        /* ignore */
-      }
+      killTree(child, "SIGTERM");
+      setTimeout(() => {
+        killTree(child, "SIGKILL");
+      }, 2000).unref();
       finish(null);
     }, timeoutMs);
 
@@ -316,11 +331,27 @@ export async function runGrok(opts: GrokRunOptions): Promise<GrokRunResult> {
     }
     trackChild(job.id, child);
 
+    const onAbort = () => {
+      killTree(child, "SIGTERM");
+      setTimeout(() => {
+        killTree(child, "SIGKILL");
+      }, 2000).unref();
+    };
+    if (opts.signal) {
+      if (opts.signal.aborted) onAbort();
+      else opts.signal.addEventListener("abort", onAbort, { once: true });
+    }
+    const clearAbort = () => {
+      if (opts.signal) opts.signal.removeEventListener("abort", onAbort);
+    };
+    child.on("close", clearAbort);
+
     void (async () => {
       const result = await waitForChild(child, timeoutSec, (stream, data) => {
         if (stream === "stdout") collector.onStdout(data);
         else void appendJobLog(job.id, data);
       });
+      clearAbort();
       collector.finish();
       const summary =
         collector.text.trim() || extractSummary(result.stdout, result.stderr);
@@ -360,9 +391,26 @@ export async function runGrok(opts: GrokRunOptions): Promise<GrokRunResult> {
 
   const collector = makeStreamCollector(opts.onEvent);
   const { child, command } = spawnGrok(args, opts.cwd);
+
+  const onAbort = () => {
+    killTree(child, "SIGTERM");
+    setTimeout(() => {
+      killTree(child, "SIGKILL");
+    }, 2000).unref();
+  };
+  if (opts.signal) {
+    if (opts.signal.aborted) onAbort();
+    else opts.signal.addEventListener("abort", onAbort, { once: true });
+  }
+  const clearAbort = () => {
+    if (opts.signal) opts.signal.removeEventListener("abort", onAbort);
+  };
+  child.on("close", clearAbort);
+
   const result = await waitForChild(child, timeoutSec, (stream, data) => {
     if (stream === "stdout") collector.onStdout(data);
   });
+  clearAbort();
   collector.finish();
   const summary =
     collector.text.trim() || extractSummary(result.stdout, result.stderr);

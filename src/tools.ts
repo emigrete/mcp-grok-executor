@@ -18,6 +18,7 @@ import {
   getJob,
   listJobs,
   readJobLog,
+  registerAbort,
   updateJob,
 } from "./jobs.js";
 
@@ -229,8 +230,7 @@ export function registerTools(server: McpServer): void {
         "server-side and return structured evidence (attempts, changed files, diff, verify output). " +
         "Same approval bar as execute_task: only after the user approved a plan. " +
         "Prefer this over execute_task when a test/build command can verify the work. " +
-        "Note: cancel_task on a background run_task marks the job cancelled but does not kill " +
-        "in-flight grok sub-processes (v1 limitation).",
+        "cancel_task also aborts in-flight grok sub-processes.",
       inputSchema: {
         ...commonShape,
         verify_command: z
@@ -282,8 +282,11 @@ export function registerTools(server: McpServer): void {
           cwd,
           sessionId: args.session_id,
         });
+        const ac = new AbortController();
+        registerAbort(job.id, () => ac.abort());
         void runTaskLoop({
           ...loopOpts,
+          signal: ac.signal,
           onProgress: (line) => void appendJobLog(job.id, line + "\n"),
           onEvent: (ev) => void appendJobLog(job.id, formatEvent(ev) + "\n"),
         })

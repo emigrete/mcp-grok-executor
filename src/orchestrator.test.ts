@@ -181,3 +181,23 @@ test("fix runs continue the same session", async () => {
   assert.deepEqual(modes[0], { mode: "execute", sessionId: undefined });
   assert.deepEqual(modes[1], { mode: "continue", sessionId: "s1" });
 });
+
+test("abort between execute and verify skips verify", async () => {
+  const ac = new AbortController();
+  const r = await runTaskLoop(
+    { prompt: "do", cwd: "/x", verifyCommand: "npm test", signal: ac.signal },
+    {
+      runGrok: async () => {
+        ac.abort();
+        return okRun("done");
+      },
+      gitEvidence: async () => dirtyGit,
+      runCommand: async () => {
+        throw new Error("must not be called");
+      },
+    },
+  );
+  assert.equal(r.ok, false);
+  assert.equal(r.error, "cancelled");
+  assert.equal(r.verify, null);
+});
