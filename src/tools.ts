@@ -11,6 +11,7 @@ import { config } from "./config.js";
 import { runGrok } from "./grokRunner.js";
 import { formatEvent } from "./streamEvents.js";
 import { runTaskLoop } from "./orchestrator.js";
+import { tryAcquire, currentHolder } from "./locks.js";
 import {
   appendJobLog,
   cancelJob,
@@ -263,6 +264,16 @@ export function registerTools(server: McpServer): void {
     async (args, extra) => {
       const report = makeProgressReporter(extra);
       const cwd = normalizeCwd(args.cwd);
+      const lock = tryAcquire(cwd, "run_task (starting)");
+      if (!lock) {
+        return textResult(
+          {
+            ok: false,
+            error: `another run_task is active in this cwd (${currentHolder(cwd) ?? "unknown"})`,
+          },
+          true,
+        );
+      }
       const loopOpts = {
         prompt: args.prompt,
         cwd,
@@ -282,6 +293,7 @@ export function registerTools(server: McpServer): void {
           cwd,
           sessionId: args.session_id,
         });
+        lock.setHolder(`run_task job ${job.id}`);
         const ac = new AbortController();
         registerAbort(job.id, () => ac.abort());
         void runTaskLoop({
@@ -291,6 +303,7 @@ export function registerTools(server: McpServer): void {
           onEvent: (ev) => void appendJobLog(job.id, formatEvent(ev) + "\n"),
         })
           .then(async (result) => {
+            lock.release();
             if (getJob(job.id)?.state === "cancelled") return;
             await appendJobLog(
               job.id,
@@ -305,6 +318,7 @@ export function registerTools(server: McpServer): void {
             });
           })
           .catch(async (err) => {
+            lock.release();
             await updateJob(job.id, {
               state: "failed",
               finishedAt: new Date().toISOString(),
@@ -319,12 +333,17 @@ export function registerTools(server: McpServer): void {
         });
       }
 
-      const result = await runTaskLoop({
-        ...loopOpts,
-        onProgress: report,
-        onEvent: report ? (ev) => report(formatEvent(ev)) : undefined,
-      });
-      return textResult(result, !result.ok);
+      lock.setHolder("run_task (sync)");
+      try {
+        const result = await runTaskLoop({
+          ...loopOpts,
+          onProgress: report,
+          onEvent: report ? (ev) => report(formatEvent(ev)) : undefined,
+        });
+        return textResult(result, !result.ok);
+      } finally {
+        lock.release();
+      }
     },
   );
 
