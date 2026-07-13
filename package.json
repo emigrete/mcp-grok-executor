@@ -1,0 +1,43 @@
+{
+  "name": "mcp-grok-executor",
+  "version": "0.2.0",
+  "description": "MCP server: Claude Code (Fable) advisor delegates execution to Grok Build CLI",
+  "type": "module",
+  "bin": {
+    "mcp-grok-executor": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "smoke": "bash scripts/smoke.sh"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/emigrete/mcp-grok-executor.git"
+  },
+  "author": "Teodoro Welyczko",
+  "keywords": [
+    "mcp",
+    "grok",
+    "claude",
+    "xai",
+    "agent"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.0"
+  }
+}
