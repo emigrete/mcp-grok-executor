@@ -201,3 +201,103 @@ test("abort between execute and verify skips verify", async () => {
   assert.equal(r.error, "cancelled");
   assert.equal(r.verify, null);
 });
+
+test("needs_advisor short-circuits before verify", async () => {
+  const progress: string[] = [];
+  const r = await runTaskLoop(
+    {
+      prompt: "do",
+      cwd: "/x",
+      verifyCommand: "npm test",
+      onProgress: (line) => progress.push(line),
+    },
+    {
+      runGrok: async () =>
+        okRun("I did some analysis.\nNEEDS_ADVISOR: should I drop the legacy table?"),
+      gitEvidence: async () => dirtyGit,
+      runCommand: async () => {
+        throw new Error("must not be called");
+      },
+    },
+  );
+  assert.equal(r.ok, false);
+  assert.equal(r.status, "needs_advisor");
+  assert.equal(r.question, "should I drop the legacy table?");
+  assert.equal(r.verify, null);
+  assert.equal(r.sessionId, "s1");
+  assert.ok(
+    progress.some((p) => p.includes("grok needs the advisor: should I drop the legacy table?")),
+  );
+});
+
+test("needs_advisor from a fix run also short-circuits", async () => {
+  let verifies = 0;
+  let grokCalls = 0;
+  const r = await runTaskLoop(
+    { prompt: "do", cwd: "/x", verifyCommand: "npm test", maxFixAttempts: 2 },
+    {
+      runGrok: async () => {
+        grokCalls++;
+        if (grokCalls === 1) return okRun("initial work");
+        return okRun("stuck.\nNEEDS_ADVISOR: which API version should we target?");
+      },
+      gitEvidence: async () => dirtyGit,
+      runCommand: async () => {
+        verifies++;
+        return { exitCode: 1, output: "fail", timedOut: false };
+      },
+    },
+  );
+  assert.equal(r.ok, false);
+  assert.equal(r.status, "needs_advisor");
+  assert.equal(r.question, "which API version should we target?");
+  assert.equal(r.verify?.attemptsUsed, 1);
+  assert.equal(r.attempts.length, 2);
+  assert.equal(verifies, 1);
+});
+
+test("advisor protocol is appended to prompts", async () => {
+  const prompts: string[] = [];
+  let verifies = 0;
+  await runTaskLoop(
+    { prompt: "do the thing", cwd: "/x", verifyCommand: "t" },
+    {
+      runGrok: async (o) => {
+        prompts.push(o.prompt);
+        return okRun("done");
+      },
+      gitEvidence: async () => dirtyGit,
+      runCommand: async () =>
+        ++verifies === 1
+          ? { exitCode: 1, output: "no", timedOut: false }
+          : { exitCode: 0, output: "ok", timedOut: false },
+    },
+  );
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[0] ?? "", /NEEDS_ADVISOR:/);
+  assert.match(prompts[1] ?? "", /NEEDS_ADVISOR:/);
+  assert.match(prompts[0] ?? "", /do the thing/);
+  assert.match(prompts[1] ?? "", /VERIFICATION FAILED/);
+});
+
+test("normal completion has status completed", async () => {
+  const r = await runTaskLoop(
+    { prompt: "do", cwd: "/x" },
+    { runGrok: async () => okRun("done"), gitEvidence: async () => dirtyGit },
+  );
+  assert.equal(r.ok, true);
+  assert.equal(r.status, "completed");
+});
+
+test("failure has status failed", async () => {
+  const r = await runTaskLoop(
+    { prompt: "do", cwd: "/x", verifyCommand: "npm test", maxFixAttempts: 0 },
+    {
+      runGrok: async () => okRun("done"),
+      gitEvidence: async () => dirtyGit,
+      runCommand: async () => ({ exitCode: 1, output: "no", timedOut: false }),
+    },
+  );
+  assert.equal(r.ok, false);
+  assert.equal(r.status, "failed");
+});

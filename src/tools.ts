@@ -231,6 +231,7 @@ export function registerTools(server: McpServer): void {
         "server-side and return structured evidence (attempts, changed files, diff, verify output). " +
         "Same approval bar as execute_task: only after the user approved a plan. " +
         "Prefer this over execute_task when a test/build command can verify the work. " +
+        "If the result has status 'needs_advisor', answer the question via continue_task with the returned session_id. " +
         "cancel_task also aborts in-flight grok sub-processes.",
       inputSchema: {
         ...commonShape,

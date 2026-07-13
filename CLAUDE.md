@@ -24,6 +24,7 @@ You are the **advisor / orchestrator** (prefer Claude Fable for hard planning).
 6. Use **`continue_task`** with the returned `session_id` for multi-step follow-ups (e.g. fix failing tests).
 7. For long jobs, set `background: true` and poll with **`task_status`**.
 8. If auth fails, tell the user to run `grok login` (do not invent API keys).
+9. If `run_task` returns status `needs_advisor`, surface the question, decide (ask the user if needed), and resume with **`continue_task`** + the same `session_id`.
 
 ## Tool map
 

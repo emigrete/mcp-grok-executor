@@ -41,12 +41,16 @@ export type VerifyReport = {
 
 export type RunTaskResult = {
   ok: boolean;
+  /** Outcome of the loop. needs_advisor ⇒ ok is false; resume via continue_task. */
+  status: "completed" | "failed" | "needs_advisor";
   sessionId?: string;
   attempts: TaskAttempt[];
   git: GitEvidence;
   verify: VerifyReport | null;
   durationMs: number;
   error?: string;
+  /** Populated when status is needs_advisor — the executor's question for the advisor. */
+  question?: string;
   /** Sum of attempt usage.totalTokens when at least one attempt reported it. */
   totalTokens?: number;
 };
@@ -61,6 +65,21 @@ const DEFAULT_MAX_FIX_ATTEMPTS = 2;
 const DEFAULT_VERIFY_TIMEOUT_SEC = 300;
 /** Cap on verify output embedded in fix prompts (tail is most useful). */
 const VERIFY_OUTPUT_PROMPT_CHARS = 8000;
+
+const ADVISOR_PROTOCOL =
+  "\n\n[MCP BRIDGE — ADVISOR PROTOCOL]\n" +
+  "If you hit a decision that genuinely belongs to the architect (ambiguous requirement, " +
+  "destructive/irreversible action, conflicting constraints), do NOT guess and do NOT make " +
+  "speculative changes. End your turn with a single line:\n" +
+  "NEEDS_ADVISOR: <one concise question>\n" +
+  "Only use it when blocked; otherwise finish the task normally.";
+
+const NEEDS_ADVISOR_RE = /^\s*NEEDS_ADVISOR:\s*(.+)\s*$/m;
+
+function parseNeedsAdvisor(summary: string): string | null {
+  const m = summary.match(NEEDS_ADVISOR_RE);
+  return m?.[1]?.trim() ? m[1].trim() : null;
+}
 
 function tailForPrompt(output: string): string {
   if (output.length <= VERIFY_OUTPUT_PROMPT_CHARS) return output;
@@ -106,7 +125,11 @@ export async function runTaskLoop(
   let sessionId = opts.sessionId;
   let verify: VerifyReport | null = null;
 
-  const finish = async (ok: boolean, error?: string): Promise<RunTaskResult> => {
+  const finish = async (
+    ok: boolean,
+    error?: string,
+    extra?: { status?: "completed" | "failed" | "needs_advisor"; question?: string },
+  ): Promise<RunTaskResult> => {
     let totalTokens: number | undefined;
     for (const a of attempts) {
       const t = a.usage?.totalTokens;
@@ -114,14 +137,18 @@ export async function runTaskLoop(
         totalTokens = (totalTokens ?? 0) + t;
       }
     }
+    const status =
+      extra?.status ?? (ok ? "completed" : "failed");
     return {
       ok,
+      status,
       sessionId,
       attempts,
       git: await gitEvidence(opts.cwd),
       verify,
       durationMs: Date.now() - started,
       error,
+      question: extra?.question,
       totalTokens,
     };
   };
@@ -132,7 +159,7 @@ export async function runTaskLoop(
   ): Promise<GrokRunResult> => {
     progress(`── ${type}: grok run ${attempts.length + 1} ──`);
     const run = await runGrok({
-      prompt,
+      prompt: prompt + ADVISOR_PROTOCOL,
       cwd: opts.cwd,
       mode: type === "execute" ? "execute" : "continue",
       mutate: true,
@@ -157,6 +184,14 @@ export async function runTaskLoop(
   const first = await grokStep("execute", opts.prompt);
   if (!first.ok) {
     return finish(false, first.error ?? "grok execute run failed");
+  }
+  const firstQuestion = parseNeedsAdvisor(first.summary);
+  if (firstQuestion !== null) {
+    progress(`── grok needs the advisor: ${firstQuestion} ──`);
+    return finish(false, undefined, {
+      status: "needs_advisor",
+      question: firstQuestion,
+    });
   }
   if (opts.signal?.aborted) {
     return finish(false, "cancelled");
@@ -198,6 +233,14 @@ export async function runTaskLoop(
     );
     if (!fix.ok) {
       return finish(false, fix.error ?? "grok fix run failed");
+    }
+    const fixQuestion = parseNeedsAdvisor(fix.summary);
+    if (fixQuestion !== null) {
+      progress(`── grok needs the advisor: ${fixQuestion} ──`);
+      return finish(false, undefined, {
+        status: "needs_advisor",
+        question: fixQuestion,
+      });
     }
     if (opts.signal?.aborted) {
       return finish(false, "cancelled");
