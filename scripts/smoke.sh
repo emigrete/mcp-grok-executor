@@ -20,6 +20,13 @@ if ! grok --no-auto-update -p "Say ok." >/tmp/mcp-grok-smoke-hello.txt 2>&1; the
 fi
 echo "    grok hello ok: $(head -c 80 /tmp/mcp-grok-smoke-hello.txt)"
 
+echo "==> grok streaming-json canary"
+if ! grok --no-auto-update --output-format streaming-json -p "Say ok." 2>/dev/null | grep -q '"type":"end"'; then
+  echo "FAIL: streaming-json format changed — no end event detected"
+  exit 1
+fi
+echo "    streaming canary ok"
+
 echo "==> MCP tool list via short-lived client"
 node --input-type=module <<'EOF'
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";

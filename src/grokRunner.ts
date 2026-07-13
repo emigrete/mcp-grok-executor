@@ -55,6 +55,8 @@ export type GrokRunResult = {
   authOk: boolean;
   error?: string;
   usage?: { numTurns?: number; totalTokens?: number };
+  /** True when the run produced output but no parseable stream events — the grok CLI stream format may have changed. */
+  streamDegraded?: boolean;
 };
 
 function truncate(text: string, max = config.maxOutputChars): string {
@@ -412,6 +414,11 @@ export async function runGrok(opts: GrokRunOptions): Promise<GrokRunResult> {
   });
   clearAbort();
   collector.finish();
+  const streamDegraded =
+    result.exitCode === 0 &&
+    !collector.text.trim() &&
+    !collector.end &&
+    result.stdout.trim().length > 0;
   const summary =
     collector.text.trim() || extractSummary(result.stdout, result.stderr);
   const finalSessionId = collector.end?.sessionId ?? effectiveSessionId;
@@ -457,6 +464,7 @@ export async function runGrok(opts: GrokRunOptions): Promise<GrokRunResult> {
     usage: collector.end
       ? { numTurns: collector.end.numTurns, totalTokens: collector.end.totalTokens }
       : undefined,
+    streamDegraded: streamDegraded || undefined,
     error: result.timedOut
       ? `Timeout after ${timeoutSec}s`
       : ok

@@ -23,12 +23,40 @@ test("runGrok parses streaming output from fake grok", async () => {
 
   assert.equal(result.ok, true);
   assert.equal(result.summary, "All done.");
+  assert.equal(result.streamDegraded, undefined);
   // sessionId must come from the end event, overriding the generated one:
   assert.equal(result.sessionId, "11111111-1111-4111-8111-111111111111");
   assert.deepEqual(result.usage, { numTurns: 1, totalTokens: 42 });
   assert.ok(kinds.includes("thought"));
   assert.ok(kinds.includes("text"));
   assert.ok(kinds.includes("end"));
+});
+
+test("flags streamDegraded when output is not a stream", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "mgx-runner-plain-"));
+  await writeFile(join(dir, "auth.json"), "{}", "utf8");
+  process.env.GROK_BIN = join(process.cwd(), "scripts", "fake-grok.mjs");
+  process.env.GROK_AUTH_PATH = join(dir, "auth.json");
+  process.env.MCP_GROK_CACHE_DIR = join(dir, "cache");
+  process.env.FAKE_GROK_MODE = "plain";
+
+  try {
+    const { runGrok } = await import("./grokRunner.js");
+    const result = await runGrok({
+      prompt: "irrelevant",
+      cwd: dir,
+      mode: "execute",
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.streamDegraded, true);
+    assert.ok(
+      result.summary.includes("Plain non-JSON output."),
+      `expected summary to contain plain output, got: ${result.summary}`,
+    );
+  } finally {
+    delete process.env.FAKE_GROK_MODE;
+  }
 });
 
 test("abort kills a slow grok run", async () => {
