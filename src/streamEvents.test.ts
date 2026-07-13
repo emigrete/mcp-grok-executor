@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { StreamParser, formatEvent } from "./streamEvents.js";
+import { StreamParser, formatEvent, DeltaAggregator } from "./streamEvents.js";
 
 test("aggregates consecutive text deltas and parses end event", () => {
   const p = new StreamParser();
@@ -68,4 +68,39 @@ test("formatEvent labels each kind", () => {
   assert.equal(formatEvent({ kind: "thought", text: "t" }), "[thought] t");
   assert.match(formatEvent({ kind: "end", sessionId: "s" }), /^\[end\] session=s/);
   assert.equal(formatEvent({ kind: "raw", line: "z" }), "[raw] z");
+});
+
+test("formatEvent formats tool events with and without detail", () => {
+  assert.equal(
+    formatEvent({ kind: "tool", name: "write", status: "started" }),
+    "[tool] write (started)",
+  );
+  assert.equal(
+    formatEvent({ kind: "tool", name: "write", status: "started", detail: "/path/foo.ts" }),
+    "[tool] write (started) — /path/foo.ts",
+  );
+});
+
+test("DeltaAggregator aggregates consecutive same-kind pushes and flushes on kind switch", () => {
+  const a = new DeltaAggregator();
+  assert.deepEqual(a.push("text", "Hello "), []);
+  assert.deepEqual(a.push("text", "world"), []);
+  assert.deepEqual(a.push("thought", "hmm"), [{ kind: "text", text: "Hello world" }]);
+  assert.deepEqual(a.flush(), [{ kind: "thought", text: "hmm" }]);
+});
+
+test("DeltaAggregator flushes at 160 chars", () => {
+  const a = new DeltaAggregator();
+  const big = "x".repeat(200);
+  const evs = a.push("text", big);
+  assert.equal(evs.length, 1);
+  assert.deepEqual(evs[0], { kind: "text", text: big });
+  assert.deepEqual(a.flush(), []);
+});
+
+test("DeltaAggregator flush drains the remainder", () => {
+  const a = new DeltaAggregator();
+  assert.deepEqual(a.push("thought", "partial"), []);
+  assert.deepEqual(a.flush(), [{ kind: "thought", text: "partial" }]);
+  assert.deepEqual(a.flush(), []);
 });

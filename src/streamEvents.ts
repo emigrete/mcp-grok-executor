@@ -7,6 +7,7 @@
 export type GrokStreamEvent =
   | { kind: "thought"; text: string }
   | { kind: "text"; text: string }
+  | { kind: "tool"; name: string; status: string; detail?: string }
   | {
       kind: "end";
       sessionId?: string;
@@ -18,10 +19,40 @@ export type GrokStreamEvent =
 
 const FLUSH_CHARS = 160;
 
-export class StreamParser {
-  private lineBuf = "";
+/** Accumulates thought/text deltas; flushes on kind switch, newline, or length. */
+export class DeltaAggregator {
   private accumKind: "thought" | "text" | null = null;
   private accum = "";
+
+  push(kind: "thought" | "text", data: string): GrokStreamEvent[] {
+    const out: GrokStreamEvent[] = [];
+    if (this.accumKind !== null && this.accumKind !== kind) this.emitAccum(out);
+    this.accumKind = kind;
+    this.accum += data;
+    if (this.accum.includes("\n") || this.accum.length >= FLUSH_CHARS) {
+      this.emitAccum(out);
+    }
+    return out;
+  }
+
+  flush(): GrokStreamEvent[] {
+    const out: GrokStreamEvent[] = [];
+    this.emitAccum(out);
+    return out;
+  }
+
+  private emitAccum(out: GrokStreamEvent[]): void {
+    if (this.accumKind !== null && this.accum.length > 0) {
+      out.push({ kind: this.accumKind, text: this.accum });
+    }
+    this.accumKind = null;
+    this.accum = "";
+  }
+}
+
+export class StreamParser {
+  private lineBuf = "";
+  private readonly deltas = new DeltaAggregator();
 
   push(chunk: string): GrokStreamEvent[] {
     const out: GrokStreamEvent[] = [];
@@ -41,7 +72,7 @@ export class StreamParser {
     const rest = this.lineBuf.trim();
     this.lineBuf = "";
     if (rest) this.consumeLine(rest, out);
-    this.emitAccum(out);
+    out.push(...this.deltas.flush());
     return out;
   }
 
@@ -50,22 +81,17 @@ export class StreamParser {
     try {
       parsed = JSON.parse(line) as Record<string, unknown>;
     } catch {
-      this.emitAccum(out);
+      out.push(...this.deltas.flush());
       out.push({ kind: "raw", line });
       return;
     }
     const type = parsed.type;
     if ((type === "thought" || type === "text") && typeof parsed.data === "string") {
-      if (this.accumKind !== null && this.accumKind !== type) this.emitAccum(out);
-      this.accumKind = type;
-      this.accum += parsed.data;
-      if (this.accum.includes("\n") || this.accum.length >= FLUSH_CHARS) {
-        this.emitAccum(out);
-      }
+      out.push(...this.deltas.push(type, parsed.data));
       return;
     }
     if (type === "end") {
-      this.emitAccum(out);
+      out.push(...this.deltas.flush());
       const usage = (parsed.usage ?? {}) as Record<string, unknown>;
       out.push({
         kind: "end",
@@ -77,16 +103,8 @@ export class StreamParser {
       });
       return;
     }
-    this.emitAccum(out);
+    out.push(...this.deltas.flush());
     out.push({ kind: "raw", line });
-  }
-
-  private emitAccum(out: GrokStreamEvent[]): void {
-    if (this.accumKind !== null && this.accum.length > 0) {
-      out.push({ kind: this.accumKind, text: this.accum });
-    }
-    this.accumKind = null;
-    this.accum = "";
   }
 }
 
@@ -97,6 +115,8 @@ export function formatEvent(ev: GrokStreamEvent): string {
       return `[thought] ${ev.text.trim()}`;
     case "text":
       return `[grok] ${ev.text.trim()}`;
+    case "tool":
+      return `[tool] ${ev.name} (${ev.status})` + (ev.detail != null ? ` — ${ev.detail}` : "");
     case "end":
       return `[end] session=${ev.sessionId ?? "?"} stop=${ev.stopReason ?? "?"} turns=${ev.numTurns ?? "?"} tokens=${ev.totalTokens ?? "?"}`;
     case "raw":
