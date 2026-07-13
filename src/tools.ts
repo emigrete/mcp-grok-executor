@@ -144,7 +144,7 @@ export function registerTools(server: McpServer): void {
         maxTurns: args.max_turns,
         timeoutSec: args.timeout_sec,
         background: args.background,
-        onEvent: report ? (ev) => report(formatEvent(ev)) : undefined,
+        onEvent: report ? (ev) => report(formatEvent(ev), ev.kind === "tool" || ev.kind === "end") : undefined,
       });
       return textResult(result, !result.ok);
     },
@@ -177,7 +177,7 @@ export function registerTools(server: McpServer): void {
         timeoutSec: args.timeout_sec,
         sessionId: args.session_id,
         background: args.background,
-        onEvent: report ? (ev) => report(formatEvent(ev)) : undefined,
+        onEvent: report ? (ev) => report(formatEvent(ev), ev.kind === "tool" || ev.kind === "end") : undefined,
       });
       return textResult(result, !result.ok);
     },
@@ -217,7 +217,7 @@ export function registerTools(server: McpServer): void {
         sessionId: args.session_id,
         continueRecent: !args.session_id,
         background: args.background,
-        onEvent: report ? (ev) => report(formatEvent(ev)) : undefined,
+        onEvent: report ? (ev) => report(formatEvent(ev), ev.kind === "tool" || ev.kind === "end") : undefined,
       });
       return textResult(result, !result.ok);
     },
@@ -338,7 +338,7 @@ export function registerTools(server: McpServer): void {
         const result = await runTaskLoop({
           ...loopOpts,
           onProgress: report,
-          onEvent: report ? (ev) => report(formatEvent(ev)) : undefined,
+          onEvent: report ? (ev) => report(formatEvent(ev), ev.kind === "tool" || ev.kind === "end") : undefined,
         });
         return textResult(result, !result.ok);
       } finally {
