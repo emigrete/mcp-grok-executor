@@ -38,4 +38,7 @@ export const config = {
   reviewDisallowedTools:
     process.env.MCP_GROK_REVIEW_DISALLOWED?.trim() ||
     "search_replace,write,run_terminal_cmd,run_terminal_command,image_gen,image_edit,image_to_video",
+
+  /** Transport for grok runs: "cli" (default) or "acp" (experimental) */
+  transport: process.env.MCP_GROK_TRANSPORT?.trim() || "cli",
 } as const;
