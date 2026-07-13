@@ -26,6 +26,7 @@ export type TaskAttempt = {
   exitCode: number | null;
   summary: string;
   durationMs: number;
+  usage?: { numTurns?: number; totalTokens?: number };
 };
 
 export type VerifyReport = {
@@ -44,6 +45,8 @@ export type RunTaskResult = {
   verify: VerifyReport | null;
   durationMs: number;
   error?: string;
+  /** Sum of attempt usage.totalTokens when at least one attempt reported it. */
+  totalTokens?: number;
 };
 
 export type OrchestratorDeps = {
@@ -101,15 +104,25 @@ export async function runTaskLoop(
   let sessionId = opts.sessionId;
   let verify: VerifyReport | null = null;
 
-  const finish = async (ok: boolean, error?: string): Promise<RunTaskResult> => ({
-    ok,
-    sessionId,
-    attempts,
-    git: await gitEvidence(opts.cwd),
-    verify,
-    durationMs: Date.now() - started,
-    error,
-  });
+  const finish = async (ok: boolean, error?: string): Promise<RunTaskResult> => {
+    let totalTokens: number | undefined;
+    for (const a of attempts) {
+      const t = a.usage?.totalTokens;
+      if (typeof t === "number") {
+        totalTokens = (totalTokens ?? 0) + t;
+      }
+    }
+    return {
+      ok,
+      sessionId,
+      attempts,
+      git: await gitEvidence(opts.cwd),
+      verify,
+      durationMs: Date.now() - started,
+      error,
+      totalTokens,
+    };
+  };
 
   const grokStep = async (
     type: "execute" | "fix",
@@ -132,6 +145,7 @@ export async function runTaskLoop(
       exitCode: run.exitCode,
       summary: run.summary,
       durationMs: run.durationMs,
+      usage: run.usage,
     });
     if (run.sessionId) sessionId = run.sessionId;
     return run;

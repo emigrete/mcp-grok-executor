@@ -16,6 +16,7 @@ const okRun = (summary: string): GrokRunResult => ({
   stderr: "",
   command: [],
   authOk: true,
+  usage: { numTurns: 1, totalTokens: 100 },
 });
 
 const dirtyGit: GitEvidence = {
@@ -76,6 +77,26 @@ test("fix loop converges on the second verify", async () => {
   assert.match(prompts[1] ?? "", /VERIFICATION FAILED \(attempt 1\/2\)/);
   assert.match(prompts[1] ?? "", /1 failing/);
   assert.equal(r.verify?.attemptsUsed, 2);
+  assert.equal(r.attempts[0]?.usage?.totalTokens, 100);
+  assert.equal(r.totalTokens, 200);
+});
+
+test("totalTokens is undefined when no attempt reports usage", async () => {
+  const r = await runTaskLoop(
+    { prompt: "do", cwd: "/x" },
+    {
+      runGrok: async () => {
+        const run = okRun("done");
+        delete run.usage;
+        return run;
+      },
+      gitEvidence: async () => dirtyGit,
+    },
+  );
+  assert.equal(r.ok, true);
+  assert.equal(r.attempts.length, 1);
+  assert.equal(r.attempts[0]?.usage, undefined);
+  assert.equal(r.totalTokens, undefined);
 });
 
 test("returns ok false with evidence after exhausting fix attempts", async () => {
