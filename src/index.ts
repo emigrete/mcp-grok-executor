@@ -10,11 +10,15 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { registerTools } from "./tools.js";
-import { ensureCacheDir } from "./jobs.js";
+import { ensureCacheDir, loadJobs } from "./jobs.js";
 import { checkGrokAuth } from "./auth.js";
 
 async function main(): Promise<void> {
   await ensureCacheDir();
+  const restored = await loadJobs();
+  console.error(
+    `[mcp-grok-executor] restored ${restored} job record(s)`,
+  );
 
   const auth = await checkGrokAuth();
   if (!auth.ok) {

@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ChildProcess } from "node:child_process";
@@ -39,6 +39,34 @@ export async function ensureCacheDir(): Promise<string> {
   const dir = join(config.cacheDir, "jobs");
   await mkdir(dir, { recursive: true });
   return dir;
+}
+
+/** Load persisted job metas from the cache dir into memory. Call once at
+ *  startup. Jobs still marked "running" are orphans from a previous server
+ *  process — mark them failed. Returns the number of records loaded. */
+export async function loadJobs(): Promise<number> {
+  const dir = await ensureCacheDir();
+  const entries = await readdir(dir);
+  let loaded = 0;
+  for (const name of entries) {
+    if (!name.endsWith(".json")) continue;
+    try {
+      const raw = await readFile(join(dir, name), "utf8");
+      const record = JSON.parse(raw) as JobRecord;
+      if (jobs.has(record.id)) continue;
+      if (record.state === "running") {
+        record.state = "failed";
+        record.error = "server restart";
+        record.finishedAt = new Date().toISOString();
+        await persistMeta(record);
+      }
+      jobs.set(record.id, record);
+      loaded++;
+    } catch {
+      // skip silently on parse/read errors
+    }
+  }
+  return loaded;
 }
 
 export function getJob(id: string): JobRecord | undefined {
