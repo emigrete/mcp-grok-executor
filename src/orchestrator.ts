@@ -74,11 +74,15 @@ const ADVISOR_PROTOCOL =
   "NEEDS_ADVISOR: <one concise question>\n" +
   "Only use it when blocked; otherwise finish the task normally.";
 
-const NEEDS_ADVISOR_RE = /^\s*NEEDS_ADVISOR:\s*(.+)\s*$/m;
-
-function parseNeedsAdvisor(summary: string): string | null {
-  const m = summary.match(NEEDS_ADVISOR_RE);
-  return m?.[1]?.trim() ? m[1].trim() : null;
+/** The executor protocol says "end your turn with NEEDS_ADVISOR: …", but the
+ *  stream collector may glue message segments without newlines. Detect the
+ *  LAST occurrence anywhere and capture to end of line (or end of text). */
+function detectAdvisorQuestion(summary: string): string | undefined {
+  const idx = summary.lastIndexOf("NEEDS_ADVISOR:");
+  if (idx === -1) return undefined;
+  const rest = summary.slice(idx + "NEEDS_ADVISOR:".length);
+  const line = rest.split("\n", 1)[0]?.trim();
+  return line || undefined;
 }
 
 function tailForPrompt(output: string): string {
@@ -185,8 +189,8 @@ export async function runTaskLoop(
   if (!first.ok) {
     return finish(false, first.error ?? "grok execute run failed");
   }
-  const firstQuestion = parseNeedsAdvisor(first.summary);
-  if (firstQuestion !== null) {
+  const firstQuestion = detectAdvisorQuestion(first.summary);
+  if (firstQuestion !== undefined) {
     progress(`── grok needs the advisor: ${firstQuestion} ──`);
     return finish(false, undefined, {
       status: "needs_advisor",
@@ -234,8 +238,8 @@ export async function runTaskLoop(
     if (!fix.ok) {
       return finish(false, fix.error ?? "grok fix run failed");
     }
-    const fixQuestion = parseNeedsAdvisor(fix.summary);
-    if (fixQuestion !== null) {
+    const fixQuestion = detectAdvisorQuestion(fix.summary);
+    if (fixQuestion !== undefined) {
       progress(`── grok needs the advisor: ${fixQuestion} ──`);
       return finish(false, undefined, {
         status: "needs_advisor",

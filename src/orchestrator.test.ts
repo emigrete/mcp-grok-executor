@@ -256,6 +256,39 @@ test("needs_advisor from a fix run also short-circuits", async () => {
   assert.equal(verifies, 1);
 });
 
+test("needs_advisor detected when glued without newline", async () => {
+  const r = await runTaskLoop(
+    { prompt: "do", cwd: "/x", verifyCommand: "npm test" },
+    {
+      runGrok: async () =>
+        okRun(
+          "I checked both files.NEEDS_ADVISOR: which config file is the duplicate?",
+        ),
+      gitEvidence: async () => dirtyGit,
+      runCommand: async () => {
+        throw new Error("must not be called");
+      },
+    },
+  );
+  assert.equal(r.status, "needs_advisor");
+  assert.equal(r.question, "which config file is the duplicate?");
+});
+
+test("last occurrence wins", async () => {
+  const r = await runTaskLoop(
+    { prompt: "do", cwd: "/x" },
+    {
+      runGrok: async () =>
+        okRun(
+          "The protocol says I could use NEEDS_ADVISOR: like this.\nSome more work.\nNEEDS_ADVISOR: real question?",
+        ),
+      gitEvidence: async () => dirtyGit,
+    },
+  );
+  assert.equal(r.status, "needs_advisor");
+  assert.equal(r.question, "real question?");
+});
+
 test("advisor protocol is appended to prompts", async () => {
   const prompts: string[] = [];
   let verifies = 0;
