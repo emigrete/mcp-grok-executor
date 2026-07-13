@@ -81,8 +81,8 @@ If the `grok` binary is not on the `PATH` Claude Code inherits, add `"env": { "G
 | `execute_task` | **Yes** | One-shot implementation run (`--always-approve`) |
 | `run_task` | **Yes** | **Orchestrated loop**: execute → git evidence → verify → auto-fix |
 | `continue_task` | Optional | Follow-up prompt into a previous Grok session |
-| `task_status` | No | Poll background jobs, read the live activity log |
-| `cancel_task` | No | Cancel a running background job |
+| `task_status` | No | Poll background jobs, read the live activity log. Job records survive server restarts and are also exposed as MCP resources (`grok://jobs/recent`, `grok://jobs/{id}`) |
+| `cancel_task` | No | Cancel a running background job (kills the whole process tree) |
 
 ### Common arguments
 
@@ -110,9 +110,17 @@ Returns structured evidence:
 ```json
 {
   "ok": true,
+  "status": "completed",
   "sessionId": "…",
+  "totalTokens": 12345,
   "attempts": [
-    { "type": "execute", "exitCode": 0, "summary": "…", "durationMs": 12314 }
+    {
+      "type": "execute",
+      "exitCode": 0,
+      "summary": "…",
+      "durationMs": 12314,
+      "usage": { "numTurns": 3, "totalTokens": 4200 }
+    }
   ],
   "git": {
     "isRepo": true,
@@ -124,6 +132,14 @@ Returns structured evidence:
   "verify": { "command": "npm test", "ran": true, "exitCode": 0, "output": "…", "attemptsUsed": 1 }
 }
 ```
+
+**`status`** is one of `completed` | `failed` | `needs_advisor`:
+
+- **`completed`** — Grok succeeded and verify passed (or no verify was requested).
+- **`failed`** — Grok or verify failed after retries were exhausted.
+- **`needs_advisor`** — the executor hit a genuinely ambiguous or destructive decision. Nothing is changed; the result includes a `question` for the advisor. Answer via **`continue_task`** with the returned `session_id` (and your decision in the prompt).
+
+`totalTokens` (and per-attempt `usage`) surface cost so the advisor can see how expensive the loop was.
 
 Loop policy:
 
@@ -144,6 +160,8 @@ The server runs Grok with `--output-format streaming-json` and parses the stream
    tail -f ~/.cache/mcp-grok-executor/jobs/<job_id>.log
    ```
 
+**ACP transport** — set `MCP_GROK_TRANSPORT=acp` to run `execute_task` / `run_task` (and fix retries) over `grok agent stdio` instead of the CLI stream. Visibility upgrades from narration to **real tool events**: `[tool] run_terminal_command — npm test`, per-file writes with paths, and status updates as tools complete. `review_task`, background jobs, and `continue_task` / recent-session resume still use the CLI transport.
+
 ## Sessions
 
 `execute_task` and `run_task` return a `sessionId`. Pass it to `continue_task` for stateful follow-ups ("now update the changelog", "fix the two remaining test failures") — Grok resumes with full context of what it just did.
@@ -158,6 +176,7 @@ The server runs Grok with `--output-format streaming-json` and parses the stream
 | `MCP_GROK_MAX_OUTPUT_CHARS` | `80000` | Truncation budget for inline output |
 | `MCP_GROK_MODEL` | (CLI default) | Default `-m` passed to Grok |
 | `MCP_GROK_CACHE_DIR` | `~/.cache/mcp-grok-executor` | Job records + logs |
+| `MCP_GROK_TRANSPORT` | `cli` | `cli` (default) or `acp` (experimental — real tool events via `grok agent stdio`) |
 | `MCP_GROK_REVIEW_TOOLS` | read-only set | Tool allowlist for `review_task` |
 | `MCP_GROK_REVIEW_DISALLOWED` | write/shell set | Tools stripped in `review_task` |
 
@@ -179,6 +198,8 @@ The test suite covers the stream parser, the runner (against a fake `grok` binar
 ## Security notes
 
 - `execute_task` and `run_task` run Grok with `--always-approve` — treat them like giving an autonomous agent full access to `cwd`. Gate them behind manual approval in your MCP client; leave `review_task`/`auth_status` unrestricted.
+- Concurrent `run_task` calls on the same `cwd` are rejected by a per-cwd lock (avoids two agents fighting over the same tree).
+- `cancel_task` kills the whole process tree of the background job, not just the top-level process.
 - `verify_command` is arbitrary shell executed in `cwd` — same trust level as the execution tools. Only pass commands you'd run yourself.
 - `review_task` disables Grok's write and shell tools and injects a read-only constraint, but it still runs a model with read access. Spot-check `git status` if in doubt.
 - Never add `--debug` / `--debug-file` to the Grok invocation: the Grok debug log prints the OAuth bearer token in plaintext.
@@ -186,9 +207,9 @@ The test suite covers the stream parser, the runner (against a fake `grok` binar
 
 ## Roadmap
 
-- ACP transport (`grok agent stdio`) for tool-call-level visibility (which file Grok edits, which command it runs — today you get its live narration).
-- MCP resource exposing recent job results.
-- Reverse bridge: let Grok pause mid-run and ask the advisor a question.
+- ACP for `review_task` via restricted profiles (tool visibility without write/shell).
+- Interactive `needs_advisor` over MCP elicitation (in-band Q&A instead of return-and-`continue_task`).
+- Session/load-based `continue_task` over ACP (resume the same agent session without falling back to CLI).
 
 ## License
 

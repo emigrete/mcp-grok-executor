@@ -35,7 +35,9 @@ test("acpRun maps session/update to thought/text/tool/end events", async () => {
   assert.ok(kinds.includes("text"));
   assert.ok(kinds.includes("end"));
   assert.equal(tools.length, 2);
+  assert.equal(tools[0]!.name, "write");
   assert.equal(tools[0]!.status, "started");
+  assert.equal(tools[1]!.name, "write");
   assert.equal(tools[1]!.status, "completed");
   assert.ok(kinds.filter((k) => k === "tool").length === 2);
 });

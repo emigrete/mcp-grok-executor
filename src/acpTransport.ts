@@ -99,6 +99,8 @@ async function acpRun(opts: GrokRunOptions): Promise<GrokRunResult> {
   let sessionId: string | undefined;
   const logLines: string[] = [];
   const aggregator = new DeltaAggregator();
+  /** toolCallId → title from tool_call events (updates often omit title) */
+  const toolTitles = new Map<string, string>();
   let nextId = 1;
   const pending = new Map<
     number | string,
@@ -173,6 +175,9 @@ async function acpRun(opts: GrokRunOptions): Promise<GrokRunResult> {
     if (kind === "tool_call") {
       emitAll(aggregator.flush());
       const name = truncateStr(String(update.title ?? "tool"), 80);
+      if (typeof update.toolCallId === "string") {
+        toolTitles.set(update.toolCallId, name);
+      }
       emit({
         kind: "tool",
         name,
@@ -183,8 +188,14 @@ async function acpRun(opts: GrokRunOptions): Promise<GrokRunResult> {
     }
     if (kind === "tool_call_update") {
       emitAll(aggregator.flush());
+      const toolCallId =
+        typeof update.toolCallId === "string" ? update.toolCallId : undefined;
       const name = truncateStr(
-        String(update.title ?? update.toolCallId ?? "tool"),
+        String(
+          update.title ??
+            (toolCallId !== undefined ? toolTitles.get(toolCallId) : undefined) ??
+            "tool",
+        ),
         80,
       );
       const content = update.content as Array<{ path?: string }> | undefined;

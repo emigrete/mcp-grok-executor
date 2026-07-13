@@ -1,6 +1,6 @@
 {
   "name": "mcp-grok-executor",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "MCP server: Claude Code (Fable) advisor delegates execution to Grok Build CLI",
   "type": "module",
   "bin": {
