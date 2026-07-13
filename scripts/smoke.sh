@@ -60,6 +60,19 @@ for (const e of expected) {
     process.exit(1);
   }
 }
+const resources = await client.listResources();
+const uris = resources.resources.map((r) => r.uri);
+console.log("    resources:", uris.join(", "));
+if (!uris.includes("grok://jobs/recent")) {
+  console.error("MISSING resource grok://jobs/recent");
+  process.exit(1);
+}
+const recent = await client.readResource({ uri: "grok://jobs/recent" });
+if (!Array.isArray(JSON.parse(recent.contents[0].text))) {
+  console.error("grok://jobs/recent did not return a JSON array");
+  process.exit(1);
+}
+console.log("    resource read ok");
 const auth = await client.callTool({ name: "auth_status", arguments: {} });
 const text =
   Array.isArray(auth.content) && auth.content[0] && "text" in auth.content[0]
